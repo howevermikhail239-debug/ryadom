@@ -1,0 +1,406 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  CUSTOMER
+  PERFORMER
+  MODERATOR
+  ADMIN
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum TaskStatus {
+  DRAFT
+  PUBLISHED
+  MATCHING
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  EXPIRED
+  DISPUTED
+}
+
+enum BidStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum MatchStatus {
+  CREATED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum PaymentProvider {
+  YOOKASSA
+  SBP
+}
+
+enum PaymentKind {
+  ESCROW_DEPOSIT
+  PAYOUT
+  REFUND
+}
+
+enum PaymentStatus {
+  PENDING
+  WAITING_FOR_CAPTURE
+  SUCCEEDED
+  CANCELLED
+  REFUNDED
+  FAILED
+}
+
+enum TaskPaymentMethod {
+  CASH
+  TRANSFER
+}
+
+enum NotificationChannel {
+  IN_APP
+  TELEGRAM
+  WEB_PUSH
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+model User {
+  id                   String     @id @default(uuid()) @db.Uuid
+  phone                String?    @unique @db.VarChar(16)
+  phoneVerifiedAt      DateTime?  @db.Timestamptz(3)
+  telegramId           BigInt?    @unique
+  telegramUsername     String?    @db.VarChar(64)
+  telegramChatId       BigInt?    @unique
+  telegramVerifiedAt   DateTime?  @db.Timestamptz(3)
+  displayName          String     @db.VarChar(100)
+  bio                  String?    @db.VarChar(500)
+  avatarUrl            String?    @db.Text
+  roles                UserRole[] @default([CUSTOMER])
+  status               UserStatus @default(PENDING)
+  ratingAverage        Decimal    @default(0) @db.Decimal(3, 2)
+  ratingCount          Int        @default(0)
+  completedTasks       Int        @default(0)
+  termsAcceptedAt      DateTime?  @db.Timestamptz(3)
+  personalDataAgreedAt DateTime?  @db.Timestamptz(3)
+  lastSeenAt           DateTime?  @db.Timestamptz(3)
+  cooldownUntil        DateTime?  @db.Timestamptz(3)
+  lastLocation         Unsupported("geography(Point, 4326)")?
+  createdAt            DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime   @updatedAt @db.Timestamptz(3)
+  deletedAt            DateTime?  @db.Timestamptz(3)
+  isTest               Boolean    @default(false)
+  onboardingPassed     Boolean    @default(false)
+
+  location           UserLocation?
+  favoritePlaces     FavoritePlace[]
+  sessions           AuthSession[]
+  tasksCreated       Task[]         @relation("TaskCustomer")
+  bids               Bid[]
+  matchesAsCustomer  TaskMatch[]    @relation("MatchCustomer")
+  matchesAsPerformer TaskMatch[]    @relation("MatchPerformer")
+  reviewsWritten     Review[]       @relation("ReviewAuthor")
+  reviewsReceived    Review[]       @relation("ReviewRecipient")
+  paymentsSent       Payment[]      @relation("PaymentPayer")
+  paymentsReceived   Payment[]      @relation("PaymentPayee")
+  notifications      Notification[]
+  messagesSent       Message[]
+
+  @@index([status, lastSeenAt])
+  @@map("users")
+}
+
+model AuthSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  refreshTokenHash String    @unique @db.VarChar(128)
+  userAgent        String?   @db.Text
+  ipHash           String?   @db.VarChar(128)
+  expiresAt        DateTime  @db.Timestamptz(3)
+  revokedAt        DateTime? @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("auth_sessions")
+}
+
+model OtpChallenge {
+  id            String    @id @default(uuid()) @db.Uuid
+  phone         String    @db.VarChar(16)
+  codeHash      String    @db.VarChar(128)
+  requestIpHash String?   @db.VarChar(128)
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(5)
+  expiresAt     DateTime  @db.Timestamptz(3)
+  consumedAt    DateTime? @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([phone, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("otp_challenges")
+}
+
+model UserLocation {
+  userId         String                                 @id @db.Uuid
+  latitude       Decimal                                @db.Decimal(9, 6)
+  longitude      Decimal                                @db.Decimal(9, 6)
+  accuracyMeters Int?
+  location       Unsupported("geography(Point, 4326)")?
+  consentedAt    DateTime                               @db.Timestamptz(3)
+  expiresAt      DateTime                               @db.Timestamptz(3)
+  updatedAt      DateTime                               @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("user_locations")
+}
+
+model FavoritePlace {
+  id           String                                 @id @default(uuid()) @db.Uuid
+  userId       String                                 @db.Uuid
+  name         String                                 @db.VarChar(40)
+  addressLabel String?                                @db.VarChar(300)
+  latitude     Decimal                                @db.Decimal(9, 6)
+  longitude    Decimal                                @db.Decimal(9, 6)
+  location     Unsupported("geography(Point, 4326)")?
+  createdAt    DateTime                               @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime                               @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("favorite_places")
+}
+
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique @db.VarChar(64)
+  name      String   @db.VarChar(80)
+  icon      String   @db.VarChar(64)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tasks Task[]
+
+  @@index([isActive, sortOrder])
+  @@map("categories")
+}
+
+model Task {
+  id                 String                                 @id @default(uuid()) @db.Uuid
+  customerId         String                                 @db.Uuid
+  categoryId         String                                 @db.Uuid
+  title              String                                 @db.VarChar(120)
+  description        String                                 @db.VarChar(2000)
+  priceKopecks       Int
+  currency           String                                 @default("RUB") @db.Char(3)
+  latitude           Decimal                                @db.Decimal(9, 6)
+  longitude          Decimal                                @db.Decimal(9, 6)
+  location           Unsupported("geography(Point, 4326)")?
+  addressLabel       String?                                @db.VarChar(300)
+  entranceHint       String?                                @db.VarChar(300)
+  searchRadiusMeters Int                                    @default(1000)
+  durationMinutes    Int?
+  startsAt           DateTime?                              @db.Timestamptz(3)
+  expiresAt          DateTime                               @db.Timestamptz(3)
+  status             TaskStatus                             @default(DRAFT)
+  instantAccept      Boolean                                @default(true)
+  isUrgent           Boolean                                @default(false)
+  paymentMethod      TaskPaymentMethod                      @default(CASH)
+  tipAmount          Int                                    @default(0)
+  version            Int                                    @default(1)
+  publishedAt        DateTime?                              @db.Timestamptz(3)
+  assignedAt         DateTime?                              @db.Timestamptz(3)
+  completedAt        DateTime?                              @db.Timestamptz(3)
+  cancelledAt        DateTime?                              @db.Timestamptz(3)
+  cancellationReason String?                                @db.VarChar(500)
+  createdAt          DateTime                               @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime                               @updatedAt @db.Timestamptz(3)
+
+  customer      User           @relation("TaskCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  category      Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  bids          Bid[]
+  matches       TaskMatch[]
+  payments      Payment[]
+  notifications Notification[]
+  messages      Message[]
+
+  @@index([customerId, createdAt(sort: Desc)])
+  @@index([categoryId, status])
+  @@index([status, expiresAt])
+  @@map("tasks")
+}
+
+model Message {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @db.Uuid
+  senderId  String   @db.Uuid
+  text      String?  @db.VarChar(1000)
+  imageUrl  String?  @db.Text
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  sender User @relation(fields: [senderId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt])
+  @@index([senderId, createdAt(sort: Desc)])
+  @@map("messages")
+}
+
+model Bid {
+  id                   String    @id @default(uuid()) @db.Uuid
+  taskId               String    @db.Uuid
+  performerId          String    @db.Uuid
+  proposedPriceKopecks Int?
+  etaMinutes           Int?
+  message              String?   @db.VarChar(500)
+  status               BidStatus @default(PENDING)
+  createdAt            DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime  @updatedAt @db.Timestamptz(3)
+
+  task      Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  performer User       @relation(fields: [performerId], references: [id], onDelete: Restrict)
+  match     TaskMatch?
+
+  @@unique([taskId, performerId])
+  @@index([taskId, status, createdAt])
+  @@index([performerId, status])
+  @@map("bids")
+}
+
+model TaskMatch {
+  id                 String      @id @default(uuid()) @db.Uuid
+  taskId             String      @db.Uuid
+  bidId              String?     @unique @db.Uuid
+  customerId         String      @db.Uuid
+  performerId        String      @db.Uuid
+  status             MatchStatus @default(CREATED)
+  agreedPriceKopecks Int
+  idempotencyKey     String      @unique @db.VarChar(100)
+  acceptedAt         DateTime    @default(now()) @db.Timestamptz(3)
+  confirmedAt        DateTime?   @db.Timestamptz(3)
+  startedAt          DateTime?   @db.Timestamptz(3)
+  completedAt        DateTime?   @db.Timestamptz(3)
+  cancelledAt        DateTime?   @db.Timestamptz(3)
+  createdAt          DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime    @updatedAt @db.Timestamptz(3)
+
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  bid       Bid?      @relation(fields: [bidId], references: [id], onDelete: SetNull)
+  customer  User      @relation("MatchCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  performer User      @relation("MatchPerformer", fields: [performerId], references: [id], onDelete: Restrict)
+  reviews   Review[]
+  payments  Payment[]
+
+  @@index([taskId, status])
+  @@index([customerId, status])
+  @@index([performerId, status])
+  @@map("task_matches")
+}
+
+model Review {
+  id          String   @id @default(uuid()) @db.Uuid
+  matchId     String   @db.Uuid
+  authorId    String   @db.Uuid
+  recipientId String   @db.Uuid
+  rating      Int
+  reaction    String   @db.VarChar(16)
+  tags        String[] @default([])
+  comment     String?  @db.VarChar(1000)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  match     TaskMatch @relation(fields: [matchId], references: [id], onDelete: Restrict)
+  author    User      @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  recipient User      @relation("ReviewRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
+
+  @@unique([matchId, authorId])
+  @@index([recipientId, createdAt(sort: Desc)])
+  @@map("reviews")
+}
+
+model Payment {
+  id              String          @id @default(uuid()) @db.Uuid
+  taskId          String          @db.Uuid
+  matchId         String?         @db.Uuid
+  payerId         String          @db.Uuid
+  payeeId         String?         @db.Uuid
+  provider        PaymentProvider
+  kind            PaymentKind
+  status          PaymentStatus   @default(PENDING)
+  amountKopecks   Int
+  currency        String          @default("RUB") @db.Char(3)
+  externalId      String?         @unique @db.VarChar(128)
+  idempotencyKey  String          @unique @db.VarChar(100)
+  confirmationUrl String?         @db.Text
+  providerPayload Json?
+  paidAt          DateTime?       @db.Timestamptz(3)
+  cancelledAt     DateTime?       @db.Timestamptz(3)
+  createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @db.Timestamptz(3)
+
+  task  Task       @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  match TaskMatch? @relation(fields: [matchId], references: [id], onDelete: SetNull)
+  payer User       @relation("PaymentPayer", fields: [payerId], references: [id], onDelete: Restrict)
+  payee User?      @relation("PaymentPayee", fields: [payeeId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, status])
+  @@index([matchId, kind])
+  @@index([payerId, createdAt(sort: Desc)])
+  @@map("payments")
+}
+
+model Notification {
+  id            String              @id @default(uuid()) @db.Uuid
+  userId        String              @db.Uuid
+  taskId        String?             @db.Uuid
+  channel       NotificationChannel
+  status        NotificationStatus  @default(PENDING)
+  type          String              @db.VarChar(80)
+  title         String              @db.VarChar(160)
+  body          String              @db.VarChar(1000)
+  payload       Json?
+  dedupeKey     String?             @unique @db.VarChar(160)
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime?           @db.Timestamptz(3)
+  sentAt        DateTime?           @db.Timestamptz(3)
+  error         String?             @db.Text
+  createdAt     DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime            @updatedAt @db.Timestamptz(3)
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, nextAttemptAt])
+  @@map("notifications")
+}
