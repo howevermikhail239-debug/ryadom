@@ -37,7 +37,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       const aggregate = await tx.review.aggregate({ where: { recipientId }, _avg: { rating: true }, _count: { rating: true } });
       await tx.user.update({ where: { id: recipientId }, data: { ratingAverage: aggregate._avg.rating ?? 0, ratingCount: aggregate._count.rating } });
       if (tipKopecks > 0) await tx.task.update({ where: { id: taskId }, data: { tipAmount: { increment: tipKopecks } } });
-    }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 10_000 });
+    }, { isolationLevel: "ReadCommitted", maxWait: 5000, timeout: 10_000 });
     return NextResponse.json({ ok: true, tipKopecks });
   } catch (error) {
     const code = error instanceof Error ? error.message : "REVIEW_FAILED";

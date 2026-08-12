@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LoaderCircle, MapPinOff } from "lucide-react";
 
+import { isTaskAvailableStatus } from "@/lib/tasks/policy";
 import type { Coordinates, ExecutorPoint, TaskFeedItem } from "@/types/task";
 
 type LngLat = [number, number];
@@ -193,7 +194,7 @@ export function YandexMap({
             const element = document.createElement("button");
             element.type = "button";
             const task = feature.properties.task;
-            const urgentActive = task.isUrgent && ["PUBLISHED", "MATCHING"].includes(task.status);
+            const urgentActive = task.isUrgent && isTaskAvailableStatus(task.status);
             element.className = urgentActive ? "map-task-marker map-task-marker-urgent" : "map-task-marker";
             const renderLabel = () => {
               if (!urgentActive) {
@@ -278,7 +279,7 @@ export function YandexMap({
   }, [apiKey, center, executors, onCameraChange, onPointSelect, retryKey, router, searchRadiusMeters, selectable, selectedPoint, tasks]);
 
   return (
-    <div className={`relative overflow-hidden rounded-[1.75rem] bg-stone-200 ${className}`}>
+    <div className={`relative isolate z-0 overflow-hidden rounded-[1.75rem] bg-stone-200 ${className}`}>
       <div ref={containerRef} className="absolute inset-0" />
       {loading && (
         <div className="absolute inset-0 grid place-items-center bg-stone-100/80 text-sm text-stone-600">

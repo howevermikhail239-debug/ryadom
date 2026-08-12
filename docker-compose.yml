@@ -21,6 +21,7 @@ services:
     networks: [backend]
 
   app:
+    image: ryadom-app:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -50,6 +51,22 @@ services:
       start_period: 60s
     networks: [backend]
 
+  worker:
+    image: ryadom-app:local
+    pull_policy: never
+    restart: unless-stopped
+    entrypoint: ["dumb-init", "--"]
+    command: ["node", "scripts/job-runner.mjs"]
+    env_file:
+      - .env.production
+    environment:
+      INTERNAL_JOB_URL: http://app:3000/api/internal/jobs
+      JOB_INTERVAL_MS: 30000
+    depends_on:
+      app:
+        condition: service_healthy
+    networks: [backend]
+
   caddy:
     image: caddy:2.10-alpine
     restart: unless-stopped
@@ -68,6 +85,35 @@ services:
         condition: service_healthy
     networks: [backend]
 
+  minio:
+    image: minio/minio:latest
+    profiles: ["media-test"]
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minio-local
+      MINIO_ROOT_PASSWORD: minio-local-only-password
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [backend]
+
+  minio-init:
+    image: minio/mc:latest
+    profiles: ["media-test"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mc alias set local http://minio:9000 minio-local minio-local-only-password && mc mb --ignore-existing local/ryadom-media"]
+    networks: [backend]
+
 networks:
   backend:
     driver: bridge
@@ -76,3 +122,4 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
+  minio_data:

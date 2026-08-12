@@ -22,7 +22,7 @@ export function DialogContent({ className, children, ...props }: React.Component
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 grid size-10 place-items-center rounded-full bg-white text-stone-600 shadow-sm hover:text-stone-950" aria-label="Закрыть">
+        <DialogPrimitive.Close className="absolute right-4 top-4 grid size-10 place-items-center rounded-full bg-white text-stone-600 shadow-sm hover:text-stone-950 dark:bg-stone-800 dark:text-stone-300 dark:hover:text-white" aria-label="Закрыть">
           <X className="size-5" />
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>

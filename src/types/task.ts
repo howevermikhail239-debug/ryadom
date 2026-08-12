@@ -26,3 +26,17 @@ export type CategoryOption = {
 
 export type Coordinates = { latitude: number; longitude: number };
 export type ExecutorPoint = Coordinates;
+
+export type TaskCreatePrefill = {
+  repeatOfTaskId: string;
+  categoryId: string;
+  title: string;
+  description: string;
+  priceRubles: string;
+  latitude: number;
+  longitude: number;
+  addressLabel: string;
+  isUrgent: boolean;
+  paymentMethod: "CASH" | "TRANSFER";
+  previousPerformer: { id: string; displayName: string } | null;
+};

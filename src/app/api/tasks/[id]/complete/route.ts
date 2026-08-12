@@ -1,20 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireCurrentUser } from "@/lib/auth/session";
-import { prisma } from "@/lib/db/prisma";
 import { assertSameOrigin } from "@/lib/http/security";
 import { notifyTaskStatusChanged } from "@/lib/telegram/bot";
+import { markTaskCompleted } from "@/server/services/task-workflow";
 
 export const runtime = "nodejs";
 
 const paramsSchema = z.object({ id: z.string().uuid() });
-
-type LockedTask = {
-  id: string;
-  customerId: string;
-  status: "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED" | "DISPUTED";
-};
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
@@ -22,43 +16,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     const user = await requireCurrentUser();
     const { id: taskId } = paramsSchema.parse(await context.params);
 
-    const result = await prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRaw<LockedTask[]>`
-        SELECT id, "customerId", status
-        FROM tasks
-        WHERE id = ${taskId}::uuid
-        FOR UPDATE
-      `;
-      const task = rows[0];
-      if (!task) throw new Error("TASK_NOT_FOUND");
+    const result = await markTaskCompleted(taskId, user);
 
-      const match = await tx.taskMatch.findFirst({
-        where: { taskId, performerId: user.id },
-        orderBy: { createdAt: "desc" },
-      });
-      if (!match) throw new Error("NOT_ASSIGNED_PERFORMER");
-      if (match.status === "COMPLETED" && task.status === "COMPLETED") return { changed: false };
-      if (match.status === "COMPLETED") return { changed: false };
-      if (!user.roles.includes("PERFORMER")) throw new Error("PERFORMER_REQUIRED");
-      if (!["ASSIGNED", "IN_PROGRESS"].includes(task.status) || !["CREATED", "IN_PROGRESS"].includes(match.status)) {
-        throw new Error("TASK_CANNOT_COMPLETE");
-      }
-      const proof = await tx.message.findFirst({ where: { taskId, senderId: user.id, imageUrl: { not: null } }, select: { id: true } });
-      if (!proof) throw new Error("PROOF_REQUIRED");
-
-      const now = new Date();
-      await tx.taskMatch.update({
-        where: { id: match.id },
-        data: { status: "COMPLETED", completedAt: now, startedAt: match.startedAt ?? now },
-      });
-      await tx.task.update({
-        where: { id: taskId },
-        data: { status: "IN_PROGRESS", assignedAt: task.status === "ASSIGNED" ? now : undefined, version: { increment: 1 } },
-      });
-      return { changed: true };
-    }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 10_000 });
-
-    if (result.changed) await notifyTaskStatusChanged(taskId, "исполнитель отметил выполнение — ожидается ваше подтверждение").catch(() => undefined);
+    if (result.changed) after(async () => {
+      trackProductEvent({ name: "completion_submitted", userId: user.id, taskId });
+      await notifyTaskStatusChanged(taskId, "исполнитель отметил выполнение — ожидается ваше подтверждение").catch(() => undefined);
+    });
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "COMPLETE_FAILED";
@@ -77,3 +40,4 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return NextResponse.json({ ok: false, error: response.error }, { status: response.status });
   }
 }
+import { trackProductEvent } from "@/lib/analytics/events";

@@ -11,7 +11,7 @@ import { CreateTaskModal } from "@/components/tasks/create-task-modal";
 import { TaskCard } from "@/components/tasks/task-card";
 import { Button } from "@/components/ui/button";
 import { telegramSelectionChanged } from "@/lib/telegram/haptics";
-import type { CategoryOption, Coordinates, ExecutorPoint, TaskFeedItem } from "@/types/task";
+import type { CategoryOption, Coordinates, ExecutorPoint, TaskCreatePrefill, TaskFeedItem } from "@/types/task";
 
 const MOSCOW_CENTER: Coordinates = { latitude: 55.751244, longitude: 37.618423 };
 const RADII = [500, 1000, 3000] as const;
@@ -21,16 +21,19 @@ const FILTERS = [
   { id: "walking", label: "Пешком" },
   { id: "car", label: "На авто" },
   { id: "light", label: "Легкие" },
+  { id: "verified", label: "Проверенные ✓" },
 ] as const;
 
 export function FeedPage({
   apiKey,
   categories,
   user,
+  repeatPrefill,
 }: {
   apiKey: string;
   categories: CategoryOption[];
   user: { displayName: string; avatarUrl: string | null; isAdmin: boolean; telegramVerified: boolean } | null;
+  repeatPrefill?: TaskCreatePrefill | null;
 }) {
   const [userCenter, setUserCenter] = useState<Coordinates>(MOSCOW_CENTER);
   const [searchCenter, setSearchCenter] = useState<Coordinates>(MOSCOW_CENTER);
@@ -47,6 +50,7 @@ export function FeedPage({
     if (filter === "walking") return task.distanceMeters !== null && task.distanceMeters <= 1500 && !["moving", "shift"].includes(task.category.slug);
     if (filter === "car") return ["delivery", "moving"].includes(task.category.slug);
     if (filter === "light") return task.priceKopecks <= 100_000 && !["moving", "shift"].includes(task.category.slug);
+    if (filter === "verified") return task.customer.telegramVerified;
     return true;
   }), [filter, tasks]);
 
@@ -249,7 +253,7 @@ export function FeedPage({
 
       <div className="above-bottom-nav fixed inset-x-0 z-30 px-4 py-3">
         <div className="mx-auto flex max-w-5xl items-center justify-center gap-2">
-          <CreateTaskModal categories={categories} apiKey={apiKey} initialCoordinates={userCenter} isAuthenticated={Boolean(user)} />
+          <CreateTaskModal categories={categories} apiKey={apiKey} initialCoordinates={userCenter} isAuthenticated={Boolean(user)} initialValues={repeatPrefill} initiallyOpen={Boolean(repeatPrefill)} />
         </div>
       </div>
     </main>

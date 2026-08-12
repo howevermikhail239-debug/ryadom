@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 const steps = [
   { icon: ClipboardPlus, title: "Вы заказчик", text: "Создавайте задачи в один клик и находите помощь рядом." },
   { icon: MapPinned, title: "Вы исполнитель", text: "Берите подходящие задачи рядом с домом и зарабатывайте." },
-  { icon: Banknote, title: "Безопасная сделка", text: "При онлайн-оплате деньги замораживаются на время работы." },
+  { icon: Banknote, title: "Оплата без сюрпризов", text: "Способ оплаты виден заранее: наличные или перевод. Безопасная сделка появится после подключения платежей." },
 ];
 
 export function OnboardingModal({ shouldOpen }: { shouldOpen: boolean }) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import type { TaskFeedItem } from "@/types/task";
 
@@ -36,6 +37,8 @@ type NearbyRow = {
   customerTelegramVerified: boolean;
   isUrgent: boolean;
   paymentMethod: "CASH" | "TRANSFER";
+  distanceBand: number;
+  preferredCategory: boolean;
 };
 
 export async function GET(request: NextRequest) {
@@ -45,15 +48,20 @@ export async function GET(request: NextRequest) {
   }
 
   const { latitude, longitude, radius } = parsed.data;
+  const currentUser = await getCurrentUser();
+  const currentUserId = currentUser?.id ?? null;
   const rows = await prisma.$queryRaw<NearbyRow[]>`
     SELECT
       t.id,
       t.title,
       t.description,
       t."priceKopecks",
-      t.latitude::text AS latitude,
-      t.longitude::text AS longitude,
-      t."addressLabel",
+      ROUND(t.latitude, 3)::text AS latitude,
+      ROUND(t.longitude, 3)::text AS longitude,
+      CASE
+        WHEN t."addressLabel" IS NULL THEN NULL
+        ELSE 'Точный адрес после взятия задачи'
+      END AS "addressLabel",
       t."startsAt",
       t."expiresAt",
       t.status,
@@ -61,6 +69,10 @@ export async function GET(request: NextRequest) {
         t.location,
         ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography
       ))::int AS "distanceMeters",
+      FLOOR(ST_Distance(
+        t.location,
+        ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography
+      ) / 50)::int AS "distanceBand",
       c.slug AS "categorySlug",
       c.name AS "categoryName",
       c.icon AS "categoryIcon",
@@ -72,18 +84,29 @@ export async function GET(request: NextRequest) {
       (u."telegramVerifiedAt" IS NOT NULL) AS "customerTelegramVerified"
       ,t."isUrgent"
       ,t."paymentMethod"
+      ,(${currentUserId}::uuid IS NOT NULL AND EXISTS (
+        SELECT 1 FROM notification_preference_categories selected
+        WHERE selected."preferenceUserId" = ${currentUserId}::uuid
+          AND selected."categoryId" = t."categoryId"
+      )) AS "preferredCategory"
     FROM tasks t
     JOIN categories c ON c.id = t."categoryId"
     JOIN users u ON u.id = t."customerId"
     WHERE t.status IN ('PUBLISHED'::"TaskStatus", 'MATCHING'::"TaskStatus")
       AND t."expiresAt" > NOW()
       AND t.location IS NOT NULL
+      AND (${currentUserId}::uuid IS NULL OR NOT EXISTS (
+        SELECT 1 FROM user_blocks block
+        WHERE (block."blockerId" = ${currentUserId}::uuid AND block."blockedId" = t."customerId")
+           OR (block."blockerId" = t."customerId" AND block."blockedId" = ${currentUserId}::uuid)
+      ))
+      AND (t."earlyAccessUntil" IS NULL OR t."earlyAccessUntil" <= NOW() OR t."preferredPerformerId" = ${currentUserId}::uuid)
       AND ST_DWithin(
         t.location,
         ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography,
         ${radius}
       )
-    ORDER BY "distanceMeters" ASC, t."publishedAt" DESC
+    ORDER BY "distanceBand" ASC, t."isUrgent" DESC, t."publishedAt" DESC, "preferredCategory" DESC, "distanceMeters" ASC, t.id ASC
     LIMIT 100
   `;
 

@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BookmarkPlus, Crosshair, LoaderCircle, MapPinned, Plus, Sparkles } from "lucide-react";
+import { BookmarkPlus, Crosshair, House, LoaderCircle, MapPinned, Plus, Sparkles, Star } from "lucide-react";
 
 import { LazyYandexMap } from "@/components/map/lazy-yandex-map";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } 
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { telegramNotification } from "@/lib/telegram/haptics";
-import type { CategoryOption, Coordinates } from "@/types/task";
+import type { CategoryOption, Coordinates, TaskCreatePrefill } from "@/types/task";
 
 const MOSCOW_CENTER: Coordinates = { latitude: 55.751244, longitude: 37.618423 };
 
@@ -39,29 +39,44 @@ export function CreateTaskModal({
   apiKey,
   initialCoordinates,
   isAuthenticated,
+  initialValues,
+  initiallyOpen = false,
 }: {
   categories: CategoryOption[];
   apiKey: string;
   initialCoordinates?: Coordinates | null;
   isAuthenticated: boolean;
+  initialValues?: TaskCreatePrefill | null;
+  initiallyOpen?: boolean;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [point, setPoint] = useState<Coordinates>(initialCoordinates ?? MOSCOW_CENTER);
-  const [address, setAddress] = useState("");
+  const [open, setOpen] = useState(initiallyOpen);
+  const [point, setPoint] = useState<Coordinates>(initialValues ? { latitude: initialValues.latitude, longitude: initialValues.longitude } : initialCoordinates ?? MOSCOW_CENTER);
+  const [address, setAddress] = useState(initialValues?.addressLabel ?? "");
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const defaultCategoryId = categories.find((category) => category.slug === "other")?.id ?? "";
-  const [categoryId, setCategoryId] = useState(defaultCategoryId);
-  const [title, setTitle] = useState("");
-  const [priceRubles, setPriceRubles] = useState("");
-  const [isUrgent, setIsUrgent] = useState(false);
+  const [categoryId, setCategoryId] = useState(initialValues?.categoryId ?? defaultCategoryId);
+  const [title, setTitle] = useState(initialValues?.title ?? "");
+  const [description, setDescription] = useState(initialValues?.description ?? "");
+  const [priceRubles, setPriceRubles] = useState(initialValues?.priceRubles ?? "");
+  const [isUrgent, setIsUrgent] = useState(initialValues?.isUrgent ?? false);
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "TRANSFER">(initialValues?.paymentMethod ?? "CASH");
+  const [offerPreviousPerformer, setOfferPreviousPerformer] = useState(Boolean(initialValues?.previousPerformer));
   const [places, setPlaces] = useState<FavoritePlace[]>([]);
   const [placeName, setPlaceName] = useState("");
   const [savingPlace, setSavingPlace] = useState(false);
   const selectedCategory = categories.find((category) => category.id === categoryId);
   const pricePresets = pricePresetsByCategory[selectedCategory?.slug ?? "other"] ?? pricePresetsByCategory.other;
+
+  useEffect(() => {
+    if (!initiallyOpen || !isAuthenticated) return;
+    void fetch("/api/me/places", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((result: { places?: FavoritePlace[] }) => setPlaces(result.places ?? []))
+      .catch(() => undefined);
+  }, [initiallyOpen, isAuthenticated]);
 
   const reverseGeocode = useCallback(async (coordinates: Coordinates) => {
     try {
@@ -154,7 +169,7 @@ export function CreateTaskModal({
         .then((result: { places?: FavoritePlace[] }) => setPlaces(result.places ?? []))
         .catch(() => undefined);
     }
-    if (nextOpen && initialCoordinates) {
+    if (nextOpen && initialCoordinates && !initialValues) {
       setPoint(initialCoordinates);
       void reverseGeocode(initialCoordinates);
     }
@@ -209,8 +224,6 @@ export function CreateTaskModal({
     }
     setSubmitting(true);
     setError("");
-    const form = new FormData(event.currentTarget);
-
     try {
       const response = await fetch("/api/tasks", {
         method: "POST",
@@ -218,14 +231,16 @@ export function CreateTaskModal({
         body: JSON.stringify({
           categoryId,
           title,
-          description: form.get("description"),
+          description,
           priceRubles,
           latitude: point.latitude,
           longitude: point.longitude,
           addressLabel: address || null,
           startsAt: null,
           isUrgent,
-          paymentMethod: form.get("paymentMethod"),
+          paymentMethod,
+          repeatOfTaskId: initialValues?.repeatOfTaskId ?? null,
+          offerPreviousPerformer,
         }),
       });
       const result = (await response.json()) as { taskId?: string; error?: string };
@@ -251,6 +266,20 @@ export function CreateTaskModal({
         <DialogDescription>Коротко опишите дело — публикация займёт меньше минуты.</DialogDescription>
 
         <form className="mt-6 space-y-5" onSubmit={submit}>
+          {initialValues?.previousPerformer && (
+            <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/40">
+              <input
+                type="checkbox"
+                checked={offerPreviousPerformer}
+                onChange={(event) => setOfferPreviousPerformer(event.target.checked)}
+                className="mt-1 size-4 accent-emerald-700"
+              />
+              <span>
+                <span className="block text-sm font-black text-emerald-950 dark:text-emerald-100">Сначала предложить {initialValues.previousPerformer.displayName}</span>
+                <span className="mt-1 block text-xs leading-5 text-emerald-800 dark:text-emerald-300">Исполнитель получит уведомление первым. Через 4 минуты задача автоматически откроется всем рядом.</span>
+              </span>
+            </label>
+          )}
           <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
             {quickTemplates.map((template) => (
               <button
@@ -283,10 +312,10 @@ export function CreateTaskModal({
             <legend className="text-sm font-semibold">Оплата</legend>
             <div className="grid grid-cols-2 gap-2">
               <label className="flex min-h-12 cursor-pointer items-center gap-2 rounded-2xl border border-stone-200 bg-white px-4 text-sm font-semibold has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-50 dark:border-stone-700 dark:bg-stone-900 dark:has-[:checked]:bg-emerald-950">
-                <input type="radio" name="paymentMethod" value="CASH" defaultChecked className="accent-emerald-700" /> Наличные
+                <input type="radio" name="paymentMethod" value="CASH" checked={paymentMethod === "CASH"} onChange={() => setPaymentMethod("CASH")} className="accent-emerald-700" /> Наличные
               </label>
               <label className="flex min-h-12 cursor-pointer items-center gap-2 rounded-2xl border border-stone-200 bg-white px-4 text-sm font-semibold has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-50 dark:border-stone-700 dark:bg-stone-900 dark:has-[:checked]:bg-emerald-950">
-                <input type="radio" name="paymentMethod" value="TRANSFER" className="accent-emerald-700" /> Перевод
+                <input type="radio" name="paymentMethod" value="TRANSFER" checked={paymentMethod === "TRANSFER"} onChange={() => setPaymentMethod("TRANSFER")} className="accent-emerald-700" /> Перевод
               </label>
             </div>
           </fieldset>
@@ -303,7 +332,7 @@ export function CreateTaskModal({
 
           <label className="block space-y-2">
             <span className="text-sm font-semibold">Подробности</span>
-            <Textarea name="description" required minLength={10} maxLength={2000} placeholder="Что именно нужно сделать и сколько времени это займёт?" />
+            <Textarea name="description" value={description} onChange={(event) => setDescription(event.target.value)} required minLength={10} maxLength={2000} placeholder="Что именно нужно сделать и сколько времени это займёт?" />
           </label>
 
           <label className="block space-y-2">
@@ -323,14 +352,17 @@ export function CreateTaskModal({
           </label>
 
           <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold">Где выполнить</span>
-              <Button type="button" size="sm" variant="outline" onClick={locate} disabled={locating}>
-                {locating ? <LoaderCircle className="size-4 animate-spin" /> : <Crosshair className="size-4" />}
-                Моё место
-              </Button>
+            <span className="text-sm font-semibold">Где выполнить</span>
+            <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]" aria-label="Быстрый выбор места">
+              <button type="button" onClick={locate} disabled={locating} className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-blue-900 disabled:opacity-50 dark:border-blue-900 dark:bg-blue-950/50 dark:text-blue-200">
+                {locating ? <LoaderCircle className="size-4 animate-spin" /> : <Crosshair className="size-4" />} Текущее место
+              </button>
+              {places.map((place) => {
+                const isHome = place.name.trim().toLocaleLowerCase("ru-RU") === "дом";
+                const PlaceIcon = isHome ? House : Star;
+                return <button key={place.id} type="button" onClick={() => choosePlace(place)} className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 text-sm font-bold text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200"><PlaceIcon className="size-4" />{place.name}</button>;
+              })}
             </div>
-            {places.length > 0 && <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]" aria-label="Сохранённые места">{places.map((place) => <button key={place.id} type="button" onClick={() => choosePlace(place)} className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">{place.name}</button>)}</div>}
             <LazyYandexMap
               apiKey={apiKey}
               center={point}

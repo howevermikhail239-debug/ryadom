@@ -16,7 +16,15 @@ export default async function AllTasksPage() {
       where: user?.roles.includes("ADMIN")
         ? {}
         : { OR: [
-            { status: { in: ["PUBLISHED", "MATCHING"] }, expiresAt: { gt: new Date() } },
+            {
+              status: { in: ["PUBLISHED", "MATCHING"] },
+              expiresAt: { gt: new Date() },
+              OR: [
+                { earlyAccessUntil: null },
+                { earlyAccessUntil: { lte: new Date() } },
+                ...(user ? [{ preferredPerformerId: user.id }] : []),
+              ],
+            },
             ...(user ? [{ customerId: user.id }] : []),
           ] },
       orderBy: [{ isUrgent: "desc" }, { publishedAt: "desc" }],

@@ -13,24 +13,23 @@ export async function POST(request: NextRequest) {
     assertSameOrigin(request);
     const input = bodySchema.parse(await request.json());
     const phone = normalizeRussianPhone(input.phone);
-    const challenge = await prisma.otpChallenge.findFirst({
-      where: { phone, consumedAt: null, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: "desc" },
-    });
-    if (!challenge) throw new Error("OTP_EXPIRED");
-    if (challenge.attempts >= challenge.maxAttempts) throw new Error("OTP_ATTEMPTS_EXCEEDED");
-    if (!otpMatches(challenge.codeHash, phone, input.code)) {
-      await prisma.otpChallenge.update({ where: { id: challenge.id }, data: { attempts: { increment: 1 } } });
-      throw new Error("OTP_INVALID");
-    }
-
-    const user = await prisma.$transaction(async (tx) => {
-      const consumed = await tx.otpChallenge.updateMany({
-        where: { id: challenge.id, consumedAt: null, attempts: { lt: challenge.maxAttempts }, expiresAt: { gt: new Date() } },
-        data: { consumedAt: new Date() },
-      });
-      if (consumed.count !== 1) throw new Error("OTP_ALREADY_USED");
-      return tx.user.upsert({
+    const result = await prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM otp_challenges
+        WHERE phone = ${phone} AND "consumedAt" IS NULL
+        ORDER BY "createdAt" DESC
+        LIMIT 1
+        FOR UPDATE
+      `;
+      const challenge = rows[0] ? await tx.otpChallenge.findUnique({ where: { id: rows[0].id } }) : null;
+      if (!challenge || challenge.expiresAt <= new Date()) return { error: "OTP_EXPIRED" as const };
+      if (challenge.attempts >= challenge.maxAttempts) return { error: "OTP_ATTEMPTS_EXCEEDED" as const };
+      if (!otpMatches(challenge.codeHash, phone, input.code)) {
+        await tx.otpChallenge.update({ where: { id: challenge.id }, data: { attempts: { increment: 1 } } });
+        return { error: "OTP_INVALID" as const };
+      }
+      await tx.otpChallenge.update({ where: { id: challenge.id }, data: { consumedAt: new Date() } });
+      const user = await tx.user.upsert({
         where: { phone },
         create: {
           phone,
@@ -42,8 +41,10 @@ export async function POST(request: NextRequest) {
         },
         update: { phoneVerifiedAt: new Date(), status: "ACTIVE", lastSeenAt: new Date(), deletedAt: null },
       });
-    }, { isolationLevel: "Serializable" });
-    await createSession(user.id);
+      return { userId: user.id };
+    }, { isolationLevel: "ReadCommitted" });
+    if ("error" in result) throw new Error(result.error);
+    await createSession(result.userId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     const code = error instanceof Error ? error.message : "OTP_FAILED";

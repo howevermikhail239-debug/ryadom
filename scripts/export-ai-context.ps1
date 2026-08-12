@@ -24,6 +24,7 @@ $topLevelFiles = @(
   "eslint.config.mjs",
   "next.config.ts",
   "package.json",
+  "package-lock.json",
   "postcss.config.mjs",
   "prisma.config.ts",
   "README.md",

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { serverEnv } from "@/config/server-env";
+import { selectBestYandexAddress, type YandexGeoFeature } from "@/lib/geo/yandex-geocoder";
 
 export const runtime = "nodejs";
 
@@ -13,9 +14,7 @@ const querySchema = z.object({
 type YandexGeocoderResponse = {
   response?: {
     GeoObjectCollection?: {
-      featureMember?: Array<{
-        GeoObject?: { metaDataProperty?: { GeocoderMetaData?: { text?: string; Address?: { formatted?: string } } } };
-      }>;
+      featureMember?: YandexGeoFeature[];
     };
   };
 };
@@ -30,15 +29,14 @@ export async function GET(request: NextRequest) {
   url.searchParams.set("geocode", `${longitude},${latitude}`);
   url.searchParams.set("format", "json");
   url.searchParams.set("lang", "ru_RU");
-  url.searchParams.set("results", "1");
+  url.searchParams.set("results", "10");
 
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(5000), cache: "no-store" });
     if (!response.ok) throw new Error(`Geocoder ${response.status}`);
     const data = (await response.json()) as YandexGeocoderResponse;
-    const metadata = data.response?.GeoObjectCollection?.featureMember?.[0]?.GeoObject?.metaDataProperty?.GeocoderMetaData;
-    const address = metadata?.Address?.formatted ?? metadata?.text ?? null;
-    return NextResponse.json({ address });
+    const selected = selectBestYandexAddress(data.response?.GeoObjectCollection?.featureMember ?? []);
+    return NextResponse.json({ address: selected?.address ?? null, kind: selected?.kind ?? null, precision: selected?.precision ?? null });
   } catch {
     return NextResponse.json({ address: null }, { status: 502 });
   }

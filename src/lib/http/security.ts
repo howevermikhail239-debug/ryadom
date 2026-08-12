@@ -3,24 +3,16 @@ import "server-only";
 import type { NextRequest } from "next/server";
 
 import { serverEnv } from "@/config/server-env";
+import { isAllowedRequestOrigin } from "@/lib/http/origin-policy";
 
 export function assertSameOrigin(request: NextRequest): void {
-  const origin = request.headers.get("origin");
-  if (!origin) return;
-
-  let requestOrigin: string;
-  try {
-    requestOrigin = new URL(origin).origin;
-  } catch {
-    throw new Error("INVALID_ORIGIN");
-  }
-
-  const allowedOrigins = new Set([
-    request.nextUrl.origin,
-    new URL(serverEnv.APP_URL).origin,
-  ]);
-
-  if (!allowedOrigins.has(requestOrigin)) {
+  if (!isAllowedRequestOrigin({
+    origin: request.headers.get("origin"),
+    requestOrigin: request.nextUrl.origin,
+    appOrigin: serverEnv.APP_URL,
+    forwardedHost: request.headers.get("x-forwarded-host") ?? request.headers.get("host"),
+    forwardedProto: request.headers.get("x-forwarded-proto") ?? request.nextUrl.protocol,
+  })) {
     throw new Error("INVALID_ORIGIN");
   }
 }

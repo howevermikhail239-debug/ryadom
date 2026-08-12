@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, LoaderCircle, MapPinned, Save } from "lucide-react";
+import { ArrowLeft, Crosshair, House, LoaderCircle, MapPinned, Save, Star } from "lucide-react";
 import Link from "next/link";
 
 import { LazyYandexMap } from "@/components/map/lazy-yandex-map";
@@ -25,11 +25,14 @@ type EditableTask = {
   paymentMethod: "CASH" | "TRANSFER";
 };
 
-export function EditTaskForm({ task, categories, apiKey }: { task: EditableTask; categories: CategoryOption[]; apiKey: string }) {
+type FavoritePlace = { id: string; name: string; addressLabel: string | null; latitude: number; longitude: number };
+
+export function EditTaskForm({ task, categories, apiKey, places }: { task: EditableTask; categories: CategoryOption[]; apiKey: string; places: FavoritePlace[] }) {
   const router = useRouter();
   const [point, setPoint] = useState<Coordinates>({ latitude: task.latitude, longitude: task.longitude });
   const [address, setAddress] = useState(task.addressLabel ?? "");
   const [submitting, setSubmitting] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [error, setError] = useState("");
 
   const selectPoint = useCallback(async (coordinates: Coordinates) => {
@@ -43,6 +46,30 @@ export function EditTaskForm({ task, categories, apiKey }: { task: EditableTask;
       setAddress("");
     }
   }, []);
+
+  function choosePlace(place: FavoritePlace) {
+    setPoint({ latitude: place.latitude, longitude: place.longitude });
+    setAddress(place.addressLabel ?? "");
+  }
+
+  function locate() {
+    if (!navigator.geolocation) {
+      setError("Геолокация недоступна. Выберите точку на карте.");
+      return;
+    }
+    setLocating(true);
+    setError("");
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        void selectPoint({ latitude: coords.latitude, longitude: coords.longitude }).finally(() => setLocating(false));
+      },
+      () => {
+        setLocating(false);
+        setError("Не удалось определить позицию. Выберите точку на карте.");
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 },
+    );
+  }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -101,7 +128,12 @@ export function EditTaskForm({ task, categories, apiKey }: { task: EditableTask;
           <label className="rounded-2xl border border-stone-200 p-4 dark:border-stone-700"><input className="mr-2 accent-emerald-700" type="radio" name="paymentMethod" value="TRANSFER" defaultChecked={task.paymentMethod === "TRANSFER"} />Перевод</label>
         </div></fieldset>
         <fieldset className="space-y-2"><legend className="text-sm font-semibold">Срочность</legend><div className="grid grid-cols-2 gap-2"><label className="rounded-2xl border border-stone-200 p-4 dark:border-stone-700"><input className="mr-2 accent-emerald-700" type="radio" name="urgency" value="NORMAL" defaultChecked={!task.isUrgent} />Обычная</label><label className="rounded-2xl border border-orange-200 bg-orange-50 p-4 dark:border-orange-900 dark:bg-orange-950/40"><input className="mr-2 accent-orange-600" type="radio" name="urgency" value="URGENT" defaultChecked={task.isUrgent} />Срочная</label></div></fieldset>
-        <div className="space-y-3"><span className="text-sm font-semibold">Точка на карте</span><LazyYandexMap apiKey={apiKey} center={point} selectedPoint={point} selectable onPointSelect={selectPoint} className="h-72" />
+        <div className="space-y-3"><span className="text-sm font-semibold">Точка на карте</span>
+          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]" aria-label="Быстрый выбор места">
+            <button type="button" onClick={locate} disabled={locating} className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-blue-900 disabled:opacity-50 dark:border-blue-900 dark:bg-blue-950/50 dark:text-blue-200">{locating ? <LoaderCircle className="size-4 animate-spin" /> : <Crosshair className="size-4" />} Текущее место</button>
+            {places.map((place) => { const isHome = place.name.trim().toLocaleLowerCase("ru-RU") === "дом"; const PlaceIcon = isHome ? House : Star; return <button key={place.id} type="button" onClick={() => choosePlace(place)} className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 text-sm font-bold text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200"><PlaceIcon className="size-4" />{place.name}</button>; })}
+          </div>
+          <LazyYandexMap apiKey={apiKey} center={point} selectedPoint={point} selectable onPointSelect={selectPoint} className="h-72" />
           <p className="flex items-start gap-2 rounded-2xl bg-white p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300"><MapPinned className="mt-0.5 size-4 shrink-0 text-emerald-700" />{address || `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`}</p>
         </div>
         {error && <p role="alert" className="rounded-2xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}

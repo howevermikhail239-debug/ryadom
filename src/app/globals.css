@@ -5,12 +5,18 @@
   color-scheme: light;
   --background: #f5f4ef;
   --foreground: #17211c;
+  --surface: #ffffff;
+  --surface-muted: #f0f1ed;
+  --border: #dddeda;
 }
 
 .dark {
   color-scheme: dark;
-  --background: #0c1210;
-  --foreground: #f5f5f4;
+  --background: #111713;
+  --foreground: #eef2ef;
+  --surface: #19211d;
+  --surface-muted: #222b26;
+  --border: #35413a;
 }
 
 * {
@@ -35,8 +41,39 @@ body {
 
 .dark body {
   background:
-    radial-gradient(circle at 15% -5%, rgba(6, 78, 59, 0.35), transparent 30rem),
+    radial-gradient(circle at 15% -5%, rgba(16, 185, 129, 0.13), transparent 28rem),
     var(--background);
+}
+
+.dark :where(.bg-white) { background-color: var(--surface); }
+.dark :where(.bg-stone-50) { background-color: var(--background); }
+.dark :where(.bg-stone-100, .bg-stone-200) { background-color: var(--surface-muted); }
+.dark :where(.bg-emerald-50, .bg-emerald-100) { background-color: #173529; }
+.dark :where(.bg-blue-50, .bg-blue-100) { background-color: #172554; }
+.dark :where(.bg-orange-50, .bg-orange-100) { background-color: #431f12; }
+.dark :where(.bg-red-50) { background-color: #3f1717; }
+.dark :where(.border-stone-100, .border-stone-200, .border-stone-300) { border-color: var(--border); }
+.dark :where(.text-stone-950, .text-stone-900, .text-stone-800, .text-stone-700) { color: var(--foreground); }
+.dark :where(.text-stone-600, .text-stone-500) { color: #aebbb4; }
+.dark :where(.text-emerald-950) { color: #d1fae5; }
+.dark :where(.text-blue-900) { color: #bfdbfe; }
+.dark :where(.text-blue-800) { color: #bfdbfe; }
+.dark :where(.text-orange-800, .text-orange-700) { color: #fdba74; }
+.dark :where(.text-emerald-900, .text-emerald-800, .text-emerald-700) { color: #a7f3d0; }
+.dark :where(.text-red-700) { color: #fca5a5; }
+
+.dark :where(input, textarea, select) {
+  border-color: var(--border);
+  background-color: var(--surface);
+  color: var(--foreground);
+  caret-color: #6ee7b7;
+}
+
+.dark :where(input, textarea)::placeholder { color: #77857e; }
+
+.app-content {
+  min-height: 100dvh;
+  padding-bottom: var(--app-bottom-nav-height);
 }
 
 button,
@@ -163,5 +200,5 @@ select {
 
 @keyframes urgent-soft-pulse { 50% { background: #fed7aa; box-shadow: 0 0 0 5px rgba(249, 115, 22, 0.08); } }
 
-:root { --app-bottom-nav-height: calc(4.5rem + env(safe-area-inset-bottom)); }
+:root { --app-bottom-nav-height: calc(5.25rem + env(safe-area-inset-bottom)); }
 .above-bottom-nav { bottom: var(--app-bottom-nav-height); }

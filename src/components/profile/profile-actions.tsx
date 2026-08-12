@@ -16,5 +16,5 @@ export function ProfileActions() {
     router.replace("/login");
     router.refresh();
   }
-  return <div className="flex items-center gap-2"><ThemeToggle /><Button type="button" variant="outline" className="min-h-11 rounded-2xl" onClick={logout} disabled={loggingOut}><LogOut className="size-4" /> {loggingOut ? "Выходим…" : "Выйти"}</Button></div>;
+  return <div className="flex flex-wrap items-center justify-end gap-2"><ThemeToggle showLabel /><Button type="button" variant="outline" className="min-h-11 rounded-2xl" onClick={logout} disabled={loggingOut}><LogOut className="size-4" /> {loggingOut ? "Выходим…" : "Выйти"}</Button></div>;
 }

@@ -26,6 +26,13 @@ const serverEnvSchema = z.object({
   YOOKASSA_SECRET_KEY: z.string().min(20).optional(),
   YOOKASSA_WEBHOOK_TOKEN: z.string().min(32).optional(),
   REDIS_URL: z.string().url().optional(),
+  INTERNAL_JOB_SECRET: z.string().min(32).optional(),
+  S3_ENDPOINT: z.string().url().optional(),
+  S3_REGION: z.string().min(1).optional(),
+  S3_BUCKET: z.string().min(3).optional(),
+  S3_ACCESS_KEY_ID: z.string().min(3).optional(),
+  S3_SECRET_ACCESS_KEY: z.string().min(8).optional(),
+  S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
 });
 
 const parsed = serverEnvSchema.superRefine((env, ctx) => {
@@ -50,6 +57,15 @@ const parsed = serverEnvSchema.superRefine((env, ctx) => {
       code: "custom",
       path: ["TEST_AUTH_ACCESS_CODE"],
       message: "TEST_AUTH_ACCESS_CODE обязателен при ENABLE_TEST_AUTH=true",
+    });
+  }
+
+  const s3Values = [env.S3_ENDPOINT, env.S3_REGION, env.S3_BUCKET, env.S3_ACCESS_KEY_ID, env.S3_SECRET_ACCESS_KEY];
+  if (s3Values.some(Boolean) && !s3Values.every(Boolean)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["S3_ENDPOINT"],
+      message: "Для S3-хранилища задайте endpoint, region, bucket, access key и secret key вместе",
     });
   }
 });

@@ -1,109 +1,37 @@
 import { randomUUID } from "node:crypto";
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { trackProductEvent } from "@/lib/analytics/events";
 import { requireCurrentUser } from "@/lib/auth/session";
-import { prisma } from "@/lib/db/prisma";
 import { assertSameOrigin } from "@/lib/http/security";
 import { notifyMatchCreated } from "@/lib/telegram/bot";
+import { acceptTask } from "@/server/services/task-workflow";
 
 export const runtime = "nodejs";
 
 const paramsSchema = z.object({ id: z.string().uuid() });
 const keySchema = z.string().uuid();
 
-type LockedTask = {
-  id: string;
-  customerId: string;
-  priceKopecks: number;
-  status: "PUBLISHED" | "MATCHING" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED" | "EXPIRED";
-  expiresAt: Date;
-};
-
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  let analyticsTaskId: string | undefined;
   try {
     assertSameOrigin(request);
     const user = await requireCurrentUser();
     const { id: taskId } = paramsSchema.parse(await context.params);
+    analyticsTaskId = taskId;
     const suppliedKey = request.headers.get("idempotency-key");
     const idempotencyKey = suppliedKey ? keySchema.parse(suppliedKey) : randomUUID();
 
-    const match = await prisma.$transaction(
-      async (tx) => {
-        const retry = await tx.taskMatch.findFirst({
-          where: {
-            OR: [
-              { idempotencyKey },
-              { taskId, performerId: user.id, status: { in: ["CREATED", "CONFIRMED", "IN_PROGRESS"] } },
-            ],
-          },
-          select: { id: true, taskId: true, performerId: true },
-        });
-        if (retry) {
-          if (retry.performerId !== user.id || retry.taskId !== taskId) throw new Error("IDEMPOTENCY_CONFLICT");
-          return retry;
-        }
+    const match = await acceptTask(taskId, user, idempotencyKey);
 
-        const performerRows = await tx.$queryRaw<Array<{ cooldownUntil: Date | null }>>`
-          SELECT "cooldownUntil" FROM users WHERE id = ${user.id}::uuid FOR UPDATE
-        `;
-        if (performerRows[0]?.cooldownUntil && performerRows[0].cooldownUntil > new Date()) throw new Error("COOLDOWN_ACTIVE");
-
-        const rows = await tx.$queryRaw<LockedTask[]>`
-          SELECT id, "customerId", "priceKopecks", status, "expiresAt"
-          FROM tasks
-          WHERE id = ${taskId}::uuid
-          FOR UPDATE
-        `;
-        const task = rows[0];
-        if (!task) throw new Error("TASK_NOT_FOUND");
-        if (task.customerId === user.id) throw new Error("OWN_TASK");
-        if (!user.roles.includes("PERFORMER")) throw new Error("PERFORMER_REQUIRED");
-        if (task.expiresAt <= new Date()) throw new Error("TASK_EXPIRED");
-        if (task.status !== "PUBLISHED" && task.status !== "MATCHING") throw new Error("TASK_ALREADY_TAKEN");
-
-        const bid = await tx.bid.upsert({
-          where: { taskId_performerId: { taskId, performerId: user.id } },
-          create: {
-            taskId,
-            performerId: user.id,
-            proposedPriceKopecks: task.priceKopecks,
-            status: "ACCEPTED",
-          },
-          update: { proposedPriceKopecks: task.priceKopecks, status: "ACCEPTED" },
-          select: { id: true },
-        });
-
-        const created = await tx.taskMatch.create({
-          data: {
-            taskId,
-            bidId: bid.id,
-            customerId: task.customerId,
-            performerId: user.id,
-            agreedPriceKopecks: task.priceKopecks,
-            idempotencyKey,
-            status: "IN_PROGRESS",
-            startedAt: new Date(),
-          },
-          select: { id: true, taskId: true, performerId: true },
-        });
-
-        await tx.task.update({
-          where: { id: taskId },
-          data: { status: "IN_PROGRESS", assignedAt: new Date(), version: { increment: 1 } },
-        });
-
-        await tx.bid.updateMany({
-          where: { taskId, id: { not: bid.id }, status: "PENDING" },
-          data: { status: "REJECTED" },
-        });
-
-        return created;
-      },
-      { isolationLevel: "Serializable", maxWait: 5000, timeout: 10_000 },
-    );
-
-    await notifyMatchCreated(match.id).catch(() => undefined);
+    if (match.changed) {
+      after(async () => {
+        trackProductEvent({ name: "task_accepted", userId: user.id, taskId, properties: { matchId: match.id } });
+        trackProductEvent({ name: "fast_match_success", userId: user.id, taskId, properties: { matchId: match.id } });
+        await notifyMatchCreated(match.id).catch(() => undefined);
+      });
+    }
     return NextResponse.json({ ok: true, matchId: match.id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "MATCH_FAILED";
@@ -116,12 +44,18 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       TASK_ALREADY_TAKEN: { status: 409, error: "Эту задачу уже взял другой исполнитель." },
       IDEMPOTENCY_CONFLICT: { status: 409, error: "Конфликт повторного запроса." },
       COOLDOWN_ACTIVE: { status: 429, error: "После отказа от задачи поиск временно недоступен." },
+      EARLY_ACCESS_RESTRICTED: { status: 409, error: "Пока задача доступна только приглашённому исполнителю." },
+      USER_BLOCKED: { status: 403, error: "Взаимодействие с этим пользователем заблокировано." },
       INVALID_ORIGIN: { status: 403, error: "Запрос отклонён." },
       P2034: { status: 409, error: "Кто-то взял задачу одновременно с вами. Обновите страницу." },
       P2002: { status: 409, error: "Эту задачу уже взял другой исполнитель." },
     };
     const prismaCode = typeof error === "object" && error && "code" in error ? String(error.code) : "";
     const response = responseByCode[message] ?? responseByCode[prismaCode] ?? { status: 500, error: "Не удалось взять задачу." };
+    const conflictCode = ["TASK_ALREADY_TAKEN", "P2034", "P2002"].includes(message) ? message : prismaCode;
+    if (["TASK_ALREADY_TAKEN", "P2034", "P2002"].includes(conflictCode)) {
+      after(() => trackProductEvent({ name: "fast_match_conflict", taskId: analyticsTaskId, properties: { code: conflictCode } }));
+    }
     return NextResponse.json({ ok: false, error: response.error }, { status: response.status });
   }
 }

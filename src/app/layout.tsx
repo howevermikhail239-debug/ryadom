@@ -7,6 +7,7 @@ import { RegisterServiceWorker } from "@/components/pwa/register-service-worker"
 import { BottomNavigation } from "@/components/navigation/bottom-navigation";
 import { OnboardingModal } from "@/components/onboarding/onboarding-modal";
 import { getCurrentUser } from "@/lib/auth/session";
+import { prisma } from "@/lib/db/prisma";
 
 import "./globals.css";
 
@@ -22,6 +23,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: { default: "Рядом — помощь здесь и сейчас", template: "%s · Рядом" },
     description: "Гиперлокальные микрозадачи и помощь рядом с вами.",
     applicationName: "Рядом",
+    icons: { icon: "/icon.svg" },
     manifest: "/manifest.webmanifest",
     formatDetection: { telephone: false },
     openGraph: {
@@ -49,6 +51,9 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const user = await getCurrentUser();
+  const unreadNotifications = user
+    ? await prisma.notification.count({ where: { userId: user.id, readAt: null } })
+    : 0;
   return (
     <html lang="ru" suppressHydrationWarning>
       <body>
@@ -64,8 +69,8 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <RegisterServiceWorker />
         <TelegramAutoAuth />
         {user && <OnboardingModal shouldOpen={!user.onboardingPassed} />}
-        {children}
-        <BottomNavigation />
+        <div className="app-content">{children}</div>
+        <BottomNavigation unreadCount={unreadNotifications} />
       </body>
     </html>
   );

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BadgeCheck, Banknote, Clock3, MapPin, Navigation, Pencil, ShieldCheck, Star } from "lucide-react";
+import { after } from "next/server";
+import { ArrowLeft, BadgeCheck, Banknote, Clock3, MapPin, Navigation, Pencil, Repeat2, ShieldCheck, Star } from "lucide-react";
 
 import { LazyYandexMap } from "@/components/map/lazy-yandex-map";
 import { DeleteTaskButton } from "@/components/tasks/delete-task-button";
@@ -11,10 +12,17 @@ import { TaskChat } from "@/components/tasks/task-chat";
 import { WithdrawTaskButton } from "@/components/tasks/withdraw-task-button";
 import { ReviewDialog } from "@/components/tasks/review-dialog";
 import { TimeUntil } from "@/components/tasks/time-until";
+import { EtaControl } from "@/components/tasks/eta-control";
+import { EarlyAccessNotice } from "@/components/tasks/early-access-notice";
 import { Card, CardContent } from "@/components/ui/card";
 import { UserAvatar } from "@/components/users/user-avatar";
+import { FavoritePerformerButton } from "@/components/users/favorite-performer-button";
+import { ReportDialog } from "@/components/safety/report-dialog";
+import { trackProductEvent } from "@/lib/analytics/events";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
+import { remainingEtaMinutes } from "@/lib/tasks/eta";
+import { canSeeExactTaskLocation, isRepeatableTaskStatus, isTaskManageableStatus, VISIBLE_MATCH_STATUSES } from "@/lib/tasks/policy";
 import { formatRubles } from "@/lib/utils";
 import type { TaskFeedItem } from "@/types/task";
 
@@ -55,10 +63,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         category: true,
         customer: { select: { id: true, displayName: true, avatarUrl: true, ratingAverage: true, ratingCount: true, telegramVerifiedAt: true } },
         matches: {
-          where: { status: { in: ["CREATED", "CONFIRMED", "IN_PROGRESS", "COMPLETED"] } },
+          where: { status: { in: [...VISIBLE_MATCH_STATUSES] } },
           orderBy: { createdAt: "desc" },
           take: 1,
-          include: { performer: { select: { id: true, displayName: true, avatarUrl: true, ratingAverage: true, ratingCount: true, telegramVerifiedAt: true, location: { select: { latitude: true, longitude: true, expiresAt: true } } } }, reviews: { select: { id: true, authorId: true, rating: true, reaction: true, tags: true, comment: true, createdAt: true }, orderBy: { createdAt: "asc" } } },
+          include: { bid: { select: { etaMinutes: true, updatedAt: true } }, performer: { select: { id: true, displayName: true, avatarUrl: true, ratingAverage: true, ratingCount: true, telegramVerifiedAt: true, location: { select: { latitude: true, longitude: true, expiresAt: true } } } }, reviews: { select: { id: true, authorId: true, rating: true, reaction: true, tags: true, comment: true, createdAt: true }, orderBy: { createdAt: "asc" } } },
         },
         messages: { where: { imageUrl: { not: null } }, select: { senderId: true }, take: 100 },
       },
@@ -71,7 +79,13 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const available = ["PUBLISHED", "MATCHING"].includes(task.status) && task.expiresAt > new Date();
   const isOwner = currentUser?.id === task.customerId;
   const isAdmin = currentUser?.roles.includes("ADMIN") ?? false;
-  const isPerformer = currentUser?.id === match?.performerId;
+  const isPerformer = Boolean(currentUser && match && currentUser.id === match.performerId);
+  const earlyAccessActive = Boolean(task.earlyAccessUntil && task.earlyAccessUntil > new Date());
+  const availableForCurrentUser = available && (!earlyAccessActive || currentUser?.id === task.preferredPerformerId);
+  const canSeeExactLocation = canSeeExactTaskLocation({ currentUserId: currentUser?.id, customerId: task.customerId, performerId: match?.performerId, isAdmin });
+  const displayLatitude = canSeeExactLocation ? Number(task.latitude) : Math.round(Number(task.latitude) * 1000) / 1000;
+  const displayLongitude = canSeeExactLocation ? Number(task.longitude) : Math.round(Number(task.longitude) * 1000) / 1000;
+  const displayAddress = canSeeExactLocation ? task.addressLabel : task.addressLabel ? "Точный адрес после взятия задачи" : null;
   const awaitingConfirmation = task.status === "IN_PROGRESS" && match?.status === "COMPLETED";
   const performerCanComplete = Boolean(isPerformer && ["ASSIGNED", "IN_PROGRESS"].includes(task.status) && ["CREATED", "IN_PROGRESS"].includes(match?.status ?? ""));
   const hasPerformerProof = Boolean(match && task.messages.some((message) => message.senderId === match.performerId));
@@ -87,6 +101,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
   const isParticipant = Boolean(currentUser && (isOwner || isPerformer));
   const hasReviewed = Boolean(currentUser && match?.reviews.some((review) => review.authorId === currentUser.id));
+  const etaRemaining = remainingEtaMinutes(match?.bid?.etaMinutes ?? null, match?.bid?.updatedAt ?? null);
   const timeline = [
     task.publishedAt && ["Опубликована", task.publishedAt],
     match?.acceptedAt && ["Исполнитель взял задачу", match.acceptedAt],
@@ -94,15 +109,19 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     match?.completedAt && ["Работа отправлена на подтверждение", match.completedAt],
     task.completedAt && ["Выполнение подтверждено", task.completedAt],
   ].filter((item): item is [string, Date] => Boolean(item));
-  const canManage = isAdmin || Boolean(isOwner && ["DRAFT", "PUBLISHED", "MATCHING"].includes(task.status));
+  const canManage = isAdmin || Boolean(isOwner && isTaskManageableStatus(task.status));
+  const favoritePerformer = isOwner && match && task.status === "COMPLETED"
+    ? await prisma.favoritePerformer.findUnique({ where: { customerId_performerId: { customerId: currentUser!.id, performerId: match.performerId } }, select: { performerId: true } })
+    : null;
+  after(() => trackProductEvent({ name: "task_viewed", userId: currentUser?.id, taskId: task.id, properties: { status: task.status } }));
   const mapTask: TaskFeedItem = {
     id: task.id,
     title: task.title,
     description: task.description,
     priceKopecks: task.priceKopecks,
-    latitude: Number(task.latitude),
-    longitude: Number(task.longitude),
-    addressLabel: task.addressLabel,
+    latitude: displayLatitude,
+    longitude: displayLongitude,
+    addressLabel: displayAddress,
     startsAt: task.startsAt?.toISOString() ?? null,
     expiresAt: task.expiresAt.toISOString(),
     status: task.status,
@@ -139,10 +158,11 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         {task.tipAmount > 0 && <p className="mt-1 text-sm font-bold text-amber-300">+ {formatRubles(task.tipAmount)} чаевых</p>}
         <div className="mt-5 flex flex-wrap gap-4 text-sm text-emerald-100">
           <span className="flex items-center gap-1.5"><Clock3 className="size-4" /><TimeUntil startsAt={task.startsAt?.toISOString() ?? null} /></span>
-          <span className="flex items-center gap-1.5"><MapPin className="size-4" />До {task.addressLabel ?? "точки на карте"}</span>
+          <span className="flex items-center gap-1.5"><MapPin className="size-4" />{displayAddress ?? "Точка на карте"}</span>
           <span className="flex items-center gap-1.5"><Banknote className="size-4" />{task.paymentMethod === "CASH" ? "Наличные" : "Перевод"}</span>
         </div>
         <TelegramShareButton shareUrl={telegramShareUrl} />
+        {currentUser && !isOwner && <div className="mt-2 [&_button]:text-emerald-200"><ReportDialog taskId={task.id} /></div>}
       </section>
 
       <div className="mt-5 grid gap-5 sm:grid-cols-[1fr_280px]">
@@ -152,7 +172,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
             <h2 className="mb-3 text-lg font-black">Место</h2>
             <LazyYandexMap
               apiKey={process.env.NEXT_PUBLIC_YANDEX_MAPS_API_KEY ?? ""}
-              center={{ latitude: Number(task.latitude), longitude: Number(task.longitude) }}
+              center={{ latitude: displayLatitude, longitude: displayLongitude }}
               tasks={[mapTask]}
               className="h-72"
             />
@@ -178,8 +198,12 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
               <Link href={`/users/${match.performer.id}`} className="mt-2 flex items-center gap-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"><UserAvatar name={match.performer.displayName} avatarUrl={match.performer.avatarUrl} /><span><span className="block font-bold">{match.performer.displayName}</span><span className="block text-xs text-stone-600">Рейтинг: {match.performer.ratingCount ? Number(match.performer.ratingAverage).toFixed(1) : "новый профиль"}</span></span></Link>
               <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">{match.performer.telegramVerifiedAt && <span className="flex items-center gap-1 text-sky-700"><BadgeCheck className="size-3.5" />Telegram Verified</span>}{isLocalPerformer && <span className="flex items-center gap-1 text-emerald-800"><Navigation className="size-3.5" />Локальный исполнитель</span>}</div>
               {isPerformer && <a href={`https://yandex.ru/maps/?rtext=~${Number(task.latitude)},${Number(task.longitude)}&rtt=pd`} target="_blank" rel="noreferrer noopener" className="mt-3 flex min-h-10 items-center justify-center gap-2 rounded-xl bg-emerald-700 px-3 text-sm font-bold text-white"><Navigation className="size-4" />Построить маршрут</a>}
+              {isOwner && task.status === "COMPLETED" && <FavoritePerformerButton performerId={match.performer.id} initialFavorite={Boolean(favoritePerformer)} />}
             </CardContent></Card>
           )}
+
+          {isPerformer && match?.status === "IN_PROGRESS" && <EtaControl taskId={task.id} initialEtaMinutes={match.bid?.etaMinutes ?? null} />}
+          {isOwner && etaRemaining && task.status === "IN_PROGRESS" && match?.status === "IN_PROGRESS" && <div className="rounded-3xl border border-sky-200 bg-sky-50 p-4 text-sm font-bold text-sky-900 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200"><Clock3 className="mr-2 inline size-4" />Исполнитель будет примерно через {etaRemaining} мин.</div>}
 
           {match && isParticipant && <div id="chat" className="scroll-mt-4"><TaskChat taskId={task.id} canUploadProof={Boolean(isPerformer && match.status === "IN_PROGRESS")} /></div>}
 
@@ -194,6 +218,8 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
               <DeleteTaskButton taskId={task.id} />
             </div>
           )}
+
+          {isOwner && isRepeatableTaskStatus(task.status) && <Link href={`/?repeatTask=${task.id}`} className="flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-4 text-sm font-black text-white"><Repeat2 className="size-4" /> Повторить задачу</Link>}
         </div>
       </div>
 
@@ -211,8 +237,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
             <p className="rounded-2xl bg-emerald-100 p-4 text-center text-sm font-bold text-emerald-800">Задача выполнена и подтверждена</p>
           ) : isOwner ? (
             <p className="rounded-2xl bg-stone-200 p-4 text-center text-sm font-bold text-stone-700">Это ваша задача — ждём исполнителя</p>
-          ) : available ? (
+          ) : availableForCurrentUser ? (
             <FastMatchButton taskId={task.id} authenticated={Boolean(currentUser)} cooldownUntil={currentUser?.cooldownUntil?.toISOString() ?? null} />
+          ) : available && earlyAccessActive ? (
+            <EarlyAccessNotice until={task.earlyAccessUntil!.toISOString()} />
           ) : (
             <p className="rounded-2xl bg-stone-200 p-4 text-center text-sm font-bold text-stone-700">Задача уже недоступна</p>
           )}
