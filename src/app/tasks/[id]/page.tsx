@@ -123,6 +123,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     longitude: displayLongitude,
     addressLabel: displayAddress,
     startsAt: task.startsAt?.toISOString() ?? null,
+    publishedAt: task.publishedAt?.toISOString() ?? task.createdAt.toISOString(),
     expiresAt: task.expiresAt.toISOString(),
     status: task.status,
     distanceMeters: 0,

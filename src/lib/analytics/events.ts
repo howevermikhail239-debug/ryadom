@@ -12,7 +12,16 @@ export type ProductEventName =
   | "completion_submitted"
   | "completion_confirmed"
   | "notification_sent"
-  | "notification_opened";
+  | "notification_opened"
+  | "map_opened"
+  | "map_search_here"
+  | "map_return_to_me"
+  | "map_radius_changed"
+  | "map_task_marker_opened"
+  | "map_task_opened"
+  | "map_cluster_opened"
+  | "map_executor_layer_toggled"
+  | "map_executor_marker_opened";
 
 type EventProperties = Record<string, boolean | number | string | null | undefined>;
 

@@ -40,6 +40,7 @@ export default async function AllTasksPage() {
     longitude: Number(task.longitude),
     addressLabel: task.addressLabel,
     startsAt: task.startsAt?.toISOString() ?? null,
+    publishedAt: task.publishedAt?.toISOString() ?? task.createdAt.toISOString(),
     expiresAt: task.expiresAt.toISOString(),
     status: task.status,
     distanceMeters: null,

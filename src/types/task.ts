@@ -7,6 +7,7 @@ export type TaskFeedItem = {
   longitude: number;
   addressLabel: string | null;
   startsAt: string | null;
+  publishedAt: string;
   expiresAt: string;
   status: "DRAFT" | "PUBLISHED" | "MATCHING" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED" | "EXPIRED" | "DISPUTED";
   distanceMeters: number | null;

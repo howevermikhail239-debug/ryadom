@@ -1,9 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { Coordinates, ExecutorPoint, TaskFeedItem } from "@/types/task";
-
-export type YandexMapProps = { apiKey: string; center: Coordinates; tasks?: TaskFeedItem[]; executors?: ExecutorPoint[]; selectable?: boolean; selectedPoint?: Coordinates | null; onPointSelect?: (point: Coordinates) => void; onCameraChange?: (point: Coordinates) => void; searchRadiusMeters?: number; className?: string };
+import type { YandexMapProps } from "./yandex-map";
 
 const MapSkeleton = () => <div className="grid h-full min-h-56 place-items-center rounded-[1.75rem] bg-stone-100 text-sm text-stone-500" role="status" aria-label="Загружаем карту"><span className="animate-pulse">Загружаем карту…</span></div>;
 

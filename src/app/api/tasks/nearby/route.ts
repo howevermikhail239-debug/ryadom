@@ -23,6 +23,7 @@ type NearbyRow = {
   longitude: string;
   addressLabel: string | null;
   startsAt: Date | null;
+  publishedAt: Date;
   expiresAt: Date;
   status: "PUBLISHED" | "MATCHING";
   distanceMeters: number;
@@ -63,6 +64,7 @@ export async function GET(request: NextRequest) {
         ELSE 'Точный адрес после взятия задачи'
       END AS "addressLabel",
       t."startsAt",
+      t."publishedAt",
       t."expiresAt",
       t.status,
       ROUND(ST_Distance(
@@ -119,6 +121,7 @@ export async function GET(request: NextRequest) {
     longitude: Number(row.longitude),
     addressLabel: row.addressLabel,
     startsAt: row.startsAt?.toISOString() ?? null,
+    publishedAt: row.publishedAt.toISOString(),
     expiresAt: row.expiresAt.toISOString(),
     status: row.status,
     distanceMeters: row.distanceMeters,
